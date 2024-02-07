@@ -14,6 +14,7 @@ type PubVerPar struct {
 
 type Repr struct {
 	tree TreeNode
+	set  EnumSet
 }
 
 type Com struct {
