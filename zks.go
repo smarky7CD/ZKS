@@ -46,3 +46,7 @@ func Rep(pp *PubVerPar, es *EnumSet) (*Repr, Com) {
 func Qry(pp *PubVerPar, repr *Repr, x uint64) *Answer {
 	return repr.tree.Path(pp, x, repr.set.In(x))
 }
+
+func Vfy(pp *PubVerPar, com Com, x uint64, answer *Answer) bool {
+	return VerifyPath(pp, com, x, answer)
+}

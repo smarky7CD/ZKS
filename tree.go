@@ -163,7 +163,7 @@ func MemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 	var xcoms = make(map[uint64]*Com)
 	var sibcoms = make(map[uint64]*Com)
 	var teases = make(map[uint64]*Tease)
-	for i := uint64(0); i <= tree.levels; i++ {
+	for i := uint64(0); i < tree.levels; i++ {
 		j := tree.levels - i
 		xi := x >> i
 		opens[j] = &Open{tree.tree[j][xi].r0, tree.tree[j][xi].r1}
@@ -177,7 +177,7 @@ func MemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 
 func NonMemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 	// refine tree if necessary
-	for i := uint64(0); i <= tree.levels; i++ {
+	for i := uint64(0); i < tree.levels; i++ {
 		j := tree.levels - i
 		xi := x >> i
 		_, ok := tree.tree[j][xi]
@@ -216,7 +216,7 @@ func NonMemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 	var xcoms = make(map[uint64]*Com)
 	var sibcoms = make(map[uint64]*Com)
 	var teases = make(map[uint64]*Tease)
-	for i := uint64(0); i <= tree.levels; i++ {
+	for i := uint64(0); i < tree.levels; i++ {
 		j := tree.levels - i
 		xi := x >> i
 		val := tree.tree[j][xi]
@@ -245,5 +245,122 @@ func (tree *Tree) Path(pp *PubVerPar, x uint64, a bool) *Answer {
 		return MemberPath(tree, pp, x)
 	} else {
 		return NonMemberPath(tree, pp, x)
+	}
+}
+
+func VerifyOpen(pp *PubVerPar, com Com, x uint64, answer *Answer) bool {
+	// verify all internal tree nodes
+	for i := uint64(1); i < answer.levels; i++ {
+		c := answer.xcoms[i]
+		pi := answer.opens[i]
+		vx := answer.xcoms[i+1]
+		vs := answer.sibcoms[i+1]
+		vxleft := ((x & (1 << ((answer.levels - i + 1) - 1))) >> ((answer.levels - i + 1) - 1))
+		if vxleft == 0 {
+			bsigma := vx.c0.Bytes()
+			bsigma = append(bsigma, vx.c1.Bytes()...)
+			bsigma = append(bsigma, vs.c0.Bytes()...)
+			bsigma = append(bsigma, vs.c1.Bytes()...)
+			if !mc.VerOpen(&pp.h, &c.c0, &c.c1, bsigma, &pi.r0, &pi.r1) {
+				return false
+			}
+		} else {
+			bsigma := vs.c0.Bytes()
+			bsigma = append(bsigma, vs.c1.Bytes()...)
+			bsigma = append(bsigma, vx.c0.Bytes()...)
+			bsigma = append(bsigma, vx.c1.Bytes()...)
+			if !mc.VerOpen(&pp.h, &c.c0, &c.c1, bsigma, &pi.r0, &pi.r1) {
+				return false
+			}
+		}
+	}
+
+	// check root commit
+	pi := answer.opens[0]
+	vx := answer.xcoms[1]
+	vs := answer.sibcoms[1]
+	vxleft := ((x & (1 << ((answer.levels - 1) - 1))) >> ((answer.levels - 1) - 1))
+	if vxleft == 0 {
+		bsigma := vx.c0.Bytes()
+		bsigma = append(bsigma, vx.c1.Bytes()...)
+		bsigma = append(bsigma, vs.c0.Bytes()...)
+		bsigma = append(bsigma, vs.c1.Bytes()...)
+		if !mc.VerOpen(&pp.h, &com.c0, &com.c1, bsigma, &pi.r0, &pi.r1) {
+			return false
+		}
+	} else {
+		bsigma := vs.c0.Bytes()
+		bsigma = append(bsigma, vs.c1.Bytes()...)
+		bsigma = append(bsigma, vx.c0.Bytes()...)
+		bsigma = append(bsigma, vx.c1.Bytes()...)
+		if !mc.VerOpen(&pp.h, &com.c0, &com.c1, bsigma, &pi.r0, &pi.r1) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func VerifyTease(com Com, x uint64, answer *Answer) bool {
+	// verify all internal tree nodes
+	for i := uint64(1); i < answer.levels; i++ {
+		c := answer.xcoms[i]
+		tau := answer.teases[i]
+		vx := answer.xcoms[i+1]
+		vs := answer.sibcoms[i+1]
+		vxleft := ((x & (1 << ((answer.levels - i + 1) - 1))) >> ((answer.levels - i + 1) - 1))
+		if vxleft == 0 {
+			bsigma := vx.c0.Bytes()
+			bsigma = append(bsigma, vx.c1.Bytes()...)
+			bsigma = append(bsigma, vs.c0.Bytes()...)
+			bsigma = append(bsigma, vs.c1.Bytes()...)
+			if !mc.VerTease(&c.c0, &c.c1, bsigma, tau) {
+				return false
+			}
+		} else {
+			bsigma := vs.c0.Bytes()
+			bsigma = append(bsigma, vs.c1.Bytes()...)
+			bsigma = append(bsigma, vx.c0.Bytes()...)
+			bsigma = append(bsigma, vx.c1.Bytes()...)
+			if !mc.VerTease(&c.c0, &c.c1, bsigma, tau) {
+				return false
+			}
+		}
+	}
+
+	// check root commit
+	tau := answer.teases[1]
+	vx := answer.xcoms[1]
+	vs := answer.sibcoms[1]
+	vxleft := ((x & (1 << ((answer.levels - 1) - 1))) >> ((answer.levels - 1) - 1))
+	if vxleft == 0 {
+		bsigma := vx.c0.Bytes()
+		bsigma = append(bsigma, vx.c1.Bytes()...)
+		bsigma = append(bsigma, vs.c0.Bytes()...)
+		bsigma = append(bsigma, vs.c1.Bytes()...)
+		if !mc.VerTease(&com.c0, &com.c1, bsigma, tau) {
+			return false
+		}
+	} else {
+		bsigma := vs.c0.Bytes()
+		bsigma = append(bsigma, vs.c1.Bytes()...)
+		bsigma = append(bsigma, vx.c0.Bytes()...)
+		bsigma = append(bsigma, vx.c1.Bytes()...)
+		if !mc.VerTease(&com.c0, &com.c1, bsigma, tau) {
+			return false
+		}
+	}
+
+	// check x commit
+	cx := answer.xcoms[answer.levels]
+	taux := answer.teases[answer.levels]
+	return mc.VerTease(&cx.c0, &cx.c1, []byte("bot"), taux)
+}
+
+func VerifyPath(pp *PubVerPar, com Com, x uint64, answer *Answer) bool {
+	if answer.answer {
+		return VerifyOpen(pp, com, x, answer)
+	} else {
+		return VerifyTease(com, x, answer)
 	}
 }
