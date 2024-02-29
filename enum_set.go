@@ -23,7 +23,8 @@ func (es *EnumSet) Remove(x uint64) {
 
 func (es *EnumSet) In(x uint64) bool {
 	if x < es.max {
-		return es.set[x]
+		v := es.set[x]
+		return v
 	}
 	return false
 }

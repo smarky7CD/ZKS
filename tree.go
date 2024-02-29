@@ -1,6 +1,7 @@
 package zks
 
 import (
+	"encoding/binary"
 	"math"
 
 	"github.com/bwesterb/go-ristretto"
@@ -8,164 +9,241 @@ import (
 )
 
 type TreeNode struct {
-	c0     ristretto.Point
-	c1     ristretto.Point
-	parent *TreeNode
-	left   *TreeNode
-	right  *TreeNode
+	soft bool
+	c0   ristretto.Point
+	c1   ristretto.Point
+	r0   ristretto.Scalar
+	r1   ristretto.Scalar
 }
 
-func NewNode(c0 ristretto.Point, c1 ristretto.Point, parent *TreeNode, left *TreeNode, right *TreeNode) *TreeNode {
-	return &TreeNode{c0, c1, parent, left, right}
+func NewNode(soft bool, c0 ristretto.Point, c1 ristretto.Point, r0 ristretto.Scalar, r1 ristretto.Scalar) *TreeNode {
+	return &TreeNode{soft, c0, c1, r0, r1}
 }
 
 type Tree struct {
-	root   *TreeNode
-	leaves map[uint64]*TreeNode
-	max    uint64
-	np2    uint64
+	root   TreeNode
+	tree   map[uint64]map[uint64]*TreeNode
+	levels uint64
 }
 
 func ComputeNearestPowerof2(n uint64) uint64 {
 	return uint64(math.Ceil(math.Log2(float64(n))))
 }
 
-func NewTree(pp *PubVerPar, escommits map[uint64]Com, max uint64) *Tree {
-	np2 := ComputeNearestPowerof2(max)
+func ComputeLeaves(pp *PubVerPar, es *EnumSet, level uint64) map[uint64]*TreeNode {
+	var leaves = make(map[uint64]*TreeNode)
 
-	// handle empty tree
-	if len(escommits) == 0 {
-		ra0, _ := pp.ps.ComputePrimaryPRF([]byte("epsilon"), 32)
-		ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 32)
+	for x := uint64(0); x < uint64(math.Pow(float64(level), 2)); x++ {
+
+		if es.In(x) {
+			bx := make([]byte, 8)
+			bl := make([]byte, 8)
+			binary.PutUvarint(bx, x)
+			binary.PutUvarint(bl, level)
+			bx = append(bx, bl...)
+			ra0, _ := pp.ps.ComputePrimaryPRF(bx, 64)
+			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
+			var r0, r1 ristretto.Scalar
+			r0.Derive(ra0)
+			r1.Derive(ra1)
+			c0, c1 := mc.HardCommit(&pp.h, bx, &r0, &r1)
+			leaves[x] = NewNode(false, c0, c1, r0, r1)
+		}
+
+		if !es.In(x) && es.In(x^1) {
+			bx := make([]byte, 8)
+			bl := make([]byte, 8)
+			binary.PutUvarint(bx, x)
+			binary.PutUvarint(bl, level)
+			bx = append(bx, bl...)
+			ra0, _ := pp.ps.ComputePrimaryPRF(bx, 64)
+			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
+			var r0, r1 ristretto.Scalar
+			r0.Derive(ra0)
+			r1.Derive(ra1)
+			c0, c1 := mc.SoftCommit(&r0, &r1)
+			leaves[x] = NewNode(true, c0, c1, r0, r1)
+		}
+	}
+
+	return leaves
+}
+
+func ComputeLayer(pp *PubVerPar, level uint64, prev_layer_nodes map[uint64]*TreeNode) map[uint64]*TreeNode {
+	var layer_nodes = make(map[uint64]*TreeNode)
+
+	for i := uint64(0); i < uint64(math.Pow(float64(level), 2)); i++ {
+		val0, ok0 := prev_layer_nodes[2*i]
+		val1, ok1 := prev_layer_nodes[(2*i)+1]
+
+		if ok0 && ok1 {
+			bsigma := val0.c0.Bytes()
+			bsigma = append(bsigma, val0.c1.Bytes()...)
+			bsigma = append(bsigma, val1.c0.Bytes()...)
+			bsigma = append(bsigma, val1.c1.Bytes()...)
+			bx := make([]byte, 8)
+			bl := make([]byte, 8)
+			binary.PutUvarint(bx, i)
+			binary.PutUvarint(bl, level)
+			bx = append(bx, bl...)
+			ra0, _ := pp.ps.ComputePrimaryPRF(bx, 64)
+			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
+			var r0, r1 ristretto.Scalar
+			r0.Derive(ra0)
+			r1.Derive(ra1)
+			c0, c1 := mc.HardCommit(&pp.h, bsigma, &r0, &r1)
+			layer_nodes[i] = NewNode(false, c0, c1, r0, r1)
+		}
+
+		if ok0 != ok1 {
+			bx := make([]byte, 8)
+			bl := make([]byte, 8)
+			binary.PutUvarint(bx, i)
+			binary.PutUvarint(bl, level)
+			bx = append(bx, bl...)
+			ra0, _ := pp.ps.ComputePrimaryPRF(bx, 64)
+			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
+			var r0, r1 ristretto.Scalar
+			r0.Derive(ra0)
+			r1.Derive(ra1)
+			c0, c1 := mc.SoftCommit(&r0, &r1)
+			layer_nodes[i] = NewNode(true, c0, c1, r0, r1)
+		}
+
+	}
+
+	return layer_nodes
+
+}
+
+func NewTree(pp *PubVerPar, es *EnumSet) *Tree {
+	levels := ComputeNearestPowerof2(es.max)
+	var tree = make(map[uint64]map[uint64]*TreeNode)
+
+	// compute the leaves of the tree
+	leaves := ComputeLeaves(pp, es, levels)
+	tree[levels] = leaves
+
+	// build the tree in a bottom up fashion
+	prev_layer_nodes := leaves
+	for i := int(levels) - 1; i >= 0; i-- {
+		layer_nodes := ComputeLayer(pp, uint64(i), prev_layer_nodes)
+		tree[uint64(i)] = layer_nodes
+		prev_layer_nodes = layer_nodes
+	}
+
+	// check for nil root
+	if len(tree[0]) == 0 {
+		bx := make([]byte, 8)
+		bl := make([]byte, 8)
+		binary.PutUvarint(bx, 0)
+		binary.PutUvarint(bl, 0)
+		bx = append(bx, bl...)
+		ra0, _ := pp.ps.ComputePrimaryPRF(bx, 64)
+		ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
 		var r0, r1 ristretto.Scalar
 		r0.Derive(ra0)
 		r1.Derive(ra1)
 		c0, c1 := mc.SoftCommit(&r0, &r1)
-		root := NewNode(c0, c1, nil, nil, nil)
-		return &Tree{root, nil, 0, np2}
+		tree[0][0] = NewNode(true, c0, c1, r0, r1)
 	}
 
-	// build leaves
-	leaves := make(map[uint64]*TreeNode)
-	for i := uint64(0); i < uint64(math.Pow(float64(np2), 2)); i++ {
-		if val, ok := escommits[i]; ok {
-			leaves[i] = NewNode(val.com0, val.com1, nil, nil, nil)
-		}
-	}
-
-	return NewTreeHelper(leaves, np2, leaves, max, np2, pp)
+	return &Tree{*tree[0][0], tree, levels}
 }
 
-func NewTreeHelper(curnodes map[uint64]*TreeNode, level uint64, leaves map[uint64]*TreeNode, max uint64, np2 uint64, pp *PubVerPar) *Tree {
+type Open struct {
+	r0 ristretto.Scalar
+	r1 ristretto.Scalar
+}
 
-	if level == 0 {
-		// base case -- do not have to worry about empty tree as already handled
-		val0, ok0 := curnodes[0]
-		val1, ok1 := curnodes[1]
-		// 2 non-nil nodes
-		if ok0 && ok1 {
-			bsigma := val0.c0.Bytes()
-			bsigma = append(bsigma, val0.c1.Bytes()...)
-			bsigma = append(bsigma, val1.c0.Bytes()...)
-			bsigma = append(bsigma, val1.c1.Bytes()...)
-			rsigma0, _ := pp.ps.ComputePrimaryPRF(bsigma, 32)
-			rsigma1, _ := pp.ps.ComputePrimaryPRF(rsigma0, 32)
-			var r0, r1 ristretto.Scalar
-			r0.Derive(rsigma0)
-			r1.Derive(rsigma1)
-			c0, c1 := mc.HardCommit(&pp.h, bsigma, &r0, &r1)
-			root := NewNode(c0, c1, nil, curnodes[0], curnodes[1])
-			curnodes[0].parent = root
-			curnodes[1].parent = root
-			return &Tree{root, leaves, max, np2}
-			// only 1 non-nil node
-		} else if ok0 && !ok1 {
-			bsigma := val0.c0.Bytes()
-			bsigma = append(bsigma, val0.c1.Bytes()...)
-			rsigma0, _ := pp.ps.ComputePrimaryPRF(bsigma, 32)
-			rsigma1, _ := pp.ps.ComputePrimaryPRF(rsigma0, 32)
-			var r0, r1 ristretto.Scalar
-			r0.Derive(rsigma0)
-			r1.Derive(rsigma1)
-			c0, c1 := mc.SoftCommit(&r0, &r1)
-			root := NewNode(c0, c1, nil, curnodes[0], nil)
-			curnodes[0].parent = root
-			return &Tree{root, leaves, max, np2}
+type Tease = ristretto.Scalar
 
-		} else if !ok0 && ok1 {
-			bsigma := val1.c0.Bytes()
-			bsigma = append(bsigma, val1.c1.Bytes()...)
-			rsigma0, _ := pp.ps.ComputePrimaryPRF(bsigma, 32)
-			rsigma1, _ := pp.ps.ComputePrimaryPRF(rsigma0, 32)
+func MemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
+	var opens = make(map[uint64]*Open)
+	var xcoms = make(map[uint64]*Com)
+	var sibcoms = make(map[uint64]*Com)
+	var teases = make(map[uint64]*Tease)
+	for i := uint64(0); i <= tree.levels; i++ {
+		j := tree.levels - i
+		xi := x >> i
+		opens[j] = &Open{tree.tree[j][xi].r0, tree.tree[j][xi].r1}
+		if i >= 1 {
+			xcoms[j] = &Com{tree.tree[j][xi].c0, tree.tree[j][xi].c1}
+			sibcoms[j] = &Com{tree.tree[j][xi^1].c0, tree.tree[j][xi^1].c1}
+		}
+	}
+	return &Answer{true, tree.levels, xcoms, sibcoms, opens, teases}
+}
+
+func NonMemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
+	// refine tree if necessary
+	for i := uint64(0); i <= tree.levels; i++ {
+		j := tree.levels - i
+		xi := x >> i
+		_, ok := tree.tree[j][xi]
+		if !ok {
+			if i == 0 {
+				bx := make([]byte, 8)
+				bl := make([]byte, 8)
+				binary.PutUvarint(bx, xi)
+				binary.PutUvarint(bl, j)
+				bx = append(bx, bl...)
+				ra0, _ := pp.ps.ComputePrimaryPRF(bx, 64)
+				ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
+				var r0, r1 ristretto.Scalar
+				r0.Derive(ra0)
+				r1.Derive(ra1)
+				c0, c1 := mc.HardCommit(&pp.h, []byte("bot"), &r0, &r1)
+				tree.tree[j][xi] = NewNode(false, c0, c1, r0, r1)
+			}
+			bxip := make([]byte, 8)
+			bl := make([]byte, 8)
+			binary.PutUvarint(bxip, xi^1)
+			binary.PutUvarint(bl, j)
+			bxip = append(bxip, bl...)
+			ra0, _ := pp.ps.ComputePrimaryPRF(bxip, 64)
+			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
 			var r0, r1 ristretto.Scalar
-			r0.Derive(rsigma0)
-			r1.Derive(rsigma1)
+			r0.Derive(ra0)
+			r1.Derive(ra1)
 			c0, c1 := mc.SoftCommit(&r0, &r1)
-			root := NewNode(c0, c1, nil, nil, curnodes[1])
-			curnodes[1].parent = root
-			return &Tree{root, leaves, max, np2}
+			tree.tree[j][xi] = NewNode(true, c0, c1, r0, r1)
+		}
+	}
+
+	// build answer
+	var opens = make(map[uint64]*Open)
+	var xcoms = make(map[uint64]*Com)
+	var sibcoms = make(map[uint64]*Com)
+	var teases = make(map[uint64]*Tease)
+	for i := uint64(0); i <= tree.levels; i++ {
+		j := tree.levels - i
+		xi := x >> i
+		val := tree.tree[j][xi]
+		var r ristretto.Scalar
+		if val.soft {
+			bxi := make([]byte, 8)
+			bl := make([]byte, 8)
+			binary.PutUvarint(bxi, xi)
+			binary.PutUvarint(bl, j)
+			bxi = append(bxi, bl...)
+			r = mc.SoftTease(bxi, &val.r0, &val.r1)
 		} else {
-			// something bad has happened
-			var p0, p1 ristretto.Point
-			badroot := NewNode(*p0.SetBase(), *p1.SetBase(), nil, nil, nil)
-			return &Tree{badroot, nil, 0, 0}
+			r = tree.tree[j][xi].r0
+		}
+		teases[j] = &r
+		if i >= 1 {
+			xcoms[j] = &Com{tree.tree[j][xi].c0, tree.tree[j][xi].c1}
+			sibcoms[j] = &Com{tree.tree[j][xi^1].c0, tree.tree[j][xi^1].c1}
 		}
 	}
+	return &Answer{false, tree.levels, xcoms, sibcoms, opens, teases}
+}
 
-	nextnodes := make(map[uint64]*TreeNode)
-	for i := uint64(0); i < uint64(math.Pow(float64(level), 2)); i = i + 2 {
-		j := i / 2
-		val0, ok0 := curnodes[i]
-		val1, ok1 := curnodes[1+1]
-		// 2 non-nil nodes
-		if ok0 && ok1 {
-			bsigma := val0.c0.Bytes()
-			bsigma = append(bsigma, val0.c1.Bytes()...)
-			bsigma = append(bsigma, val1.c0.Bytes()...)
-			bsigma = append(bsigma, val1.c1.Bytes()...)
-			rsigma0, _ := pp.ps.ComputePrimaryPRF(bsigma, 32)
-			rsigma1, _ := pp.ps.ComputePrimaryPRF(rsigma0, 32)
-			var r0, r1 ristretto.Scalar
-			r0.Derive(rsigma0)
-			r1.Derive(rsigma1)
-			c0, c1 := mc.HardCommit(&pp.h, bsigma, &r0, &r1)
-			nextnodes[j] = NewNode(c0, c1, nil, curnodes[i], curnodes[i+1])
-			curnodes[i].parent = nextnodes[j]
-			curnodes[i+1].parent = nextnodes[j]
-		}
-		// only 1 non-nil node
-		if ok0 && !ok1 {
-			bsigma := val0.c0.Bytes()
-			bsigma = append(bsigma, val0.c1.Bytes()...)
-			rsigma0, _ := pp.ps.ComputePrimaryPRF(bsigma, 32)
-			rsigma1, _ := pp.ps.ComputePrimaryPRF(rsigma0, 32)
-			var r0, r1 ristretto.Scalar
-			r0.Derive(rsigma0)
-			r1.Derive(rsigma1)
-			c0, c1 := mc.SoftCommit(&r0, &r1)
-			nextnodes[j] = NewNode(c0, c1, nil, curnodes[i], nil)
-			curnodes[i].parent = nextnodes[j]
-		}
-
-		if !ok0 && ok1 {
-			bsigma := val1.c0.Bytes()
-			bsigma = append(bsigma, val1.c1.Bytes()...)
-			rsigma0, _ := pp.ps.ComputePrimaryPRF(bsigma, 32)
-			rsigma1, _ := pp.ps.ComputePrimaryPRF(rsigma0, 32)
-			var r0, r1 ristretto.Scalar
-			r0.Derive(rsigma0)
-			r1.Derive(rsigma1)
-			c0, c1 := mc.SoftCommit(&r0, &r1)
-			nextnodes[j] = NewNode(c0, c1, nil, nil, curnodes[i+1])
-			curnodes[i+1].parent = nextnodes[j]
-		}
+func (tree *Tree) Path(pp *PubVerPar, x uint64, a bool) *Answer {
+	if a {
+		return MemberPath(tree, pp, x)
+	} else {
+		return NonMemberPath(tree, pp, x)
 	}
-
-	// update leaves only if this is the first bottom up call
-	//  implicitly done in the base case (|D| == 1)
-	if level == np2 {
-		return NewTreeHelper(nextnodes, level-1, curnodes, max, np2, pp)
-	}
-
-	return NewTreeHelper(nextnodes, level-1, leaves, max, np2, pp)
 }
