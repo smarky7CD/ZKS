@@ -163,7 +163,7 @@ func MemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 	var xcoms = make(map[uint64]*Com)
 	var sibcoms = make(map[uint64]*Com)
 	var teases = make(map[uint64]*Tease)
-	for i := uint64(0); i < tree.levels; i++ {
+	for i := uint64(0); i <= tree.levels; i++ {
 		j := tree.levels - i
 		xi := x >> i
 		opens[j] = &Open{tree.tree[j][xi].r0, tree.tree[j][xi].r1}
@@ -177,7 +177,7 @@ func MemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 
 func NonMemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 	// refine tree if necessary
-	for i := uint64(0); i < tree.levels; i++ {
+	for i := uint64(0); i <= tree.levels; i++ {
 		j := tree.levels - i
 		xi := x >> i
 		_, ok := tree.tree[j][xi]
@@ -216,7 +216,7 @@ func NonMemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 	var xcoms = make(map[uint64]*Com)
 	var sibcoms = make(map[uint64]*Com)
 	var teases = make(map[uint64]*Tease)
-	for i := uint64(0); i < tree.levels; i++ {
+	for i := uint64(0); i <= tree.levels; i++ {
 		j := tree.levels - i
 		xi := x >> i
 		val := tree.tree[j][xi]
