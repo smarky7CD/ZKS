@@ -33,7 +33,7 @@ func ComputeNearestPowerof2(n uint64) uint64 {
 func ComputeLeaves(pp *PubVerPar, es *EnumSet, level uint64) map[uint64]*TreeNode {
 	var leaves = make(map[uint64]*TreeNode)
 
-	for x := uint64(0); x < uint64(math.Pow(float64(level), 2)); x++ {
+	for x := uint64(0); x < uint64(math.Pow(2, float64(level))); x++ {
 
 		if es.In(x) {
 			bx := make([]byte, 8)
@@ -41,8 +41,8 @@ func ComputeLeaves(pp *PubVerPar, es *EnumSet, level uint64) map[uint64]*TreeNod
 			binary.PutUvarint(bx, x)
 			binary.PutUvarint(bl, level)
 			bx = append(bx, bl...)
-			ra0, _ := pp.ps.ComputePrimaryPRF(bx, 64)
-			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
+			ra0, _ := pp.ps.ComputePrimaryPRF(bx, 32)
+			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 32)
 			var r0, r1 ristretto.Scalar
 			r0.Derive(ra0)
 			r1.Derive(ra1)
@@ -56,8 +56,8 @@ func ComputeLeaves(pp *PubVerPar, es *EnumSet, level uint64) map[uint64]*TreeNod
 			binary.PutUvarint(bx, x)
 			binary.PutUvarint(bl, level)
 			bx = append(bx, bl...)
-			ra0, _ := pp.ps.ComputePrimaryPRF(bx, 64)
-			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
+			ra0, _ := pp.ps.ComputePrimaryPRF(bx, 32)
+			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 32)
 			var r0, r1 ristretto.Scalar
 			r0.Derive(ra0)
 			r1.Derive(ra1)
@@ -72,11 +72,21 @@ func ComputeLeaves(pp *PubVerPar, es *EnumSet, level uint64) map[uint64]*TreeNod
 func ComputeLayer(pp *PubVerPar, level uint64, prev_layer_nodes map[uint64]*TreeNode) map[uint64]*TreeNode {
 	var layer_nodes = make(map[uint64]*TreeNode)
 
-	for i := uint64(0); i < uint64(math.Pow(float64(level), 2)); i++ {
+	for i := uint64(0); i < uint64(math.Pow(2, (float64(level)))); i++ {
+
 		val0, ok0 := prev_layer_nodes[2*i]
 		val1, ok1 := prev_layer_nodes[(2*i)+1]
 
-		if ok0 && ok1 {
+		var okp0, okp1 bool
+		if i%2 == 0 {
+			_, okp0 = prev_layer_nodes[(2*i)+2]
+			_, okp1 = prev_layer_nodes[(2*i)+3]
+		} else {
+			_, okp0 = prev_layer_nodes[(2*i)-2]
+			_, okp1 = prev_layer_nodes[(2*i)-1]
+		}
+
+		if ok0 && ok1 { //this should be an invariant of ok0 || ok1 -> check this!
 			bsigma := val0.c0.Bytes()
 			bsigma = append(bsigma, val0.c1.Bytes()...)
 			bsigma = append(bsigma, val1.c0.Bytes()...)
@@ -86,23 +96,21 @@ func ComputeLayer(pp *PubVerPar, level uint64, prev_layer_nodes map[uint64]*Tree
 			binary.PutUvarint(bx, i)
 			binary.PutUvarint(bl, level)
 			bx = append(bx, bl...)
-			ra0, _ := pp.ps.ComputePrimaryPRF(bx, 64)
-			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
+			ra0, _ := pp.ps.ComputePrimaryPRF(bx, 32)
+			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 32)
 			var r0, r1 ristretto.Scalar
 			r0.Derive(ra0)
 			r1.Derive(ra1)
 			c0, c1 := mc.HardCommit(&pp.h, bsigma, &r0, &r1)
 			layer_nodes[i] = NewNode(false, c0, c1, r0, r1)
-		}
-
-		if ok0 != ok1 {
+		} else if okp0 || okp1 {
 			bx := make([]byte, 8)
 			bl := make([]byte, 8)
 			binary.PutUvarint(bx, i)
 			binary.PutUvarint(bl, level)
 			bx = append(bx, bl...)
-			ra0, _ := pp.ps.ComputePrimaryPRF(bx, 64)
-			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
+			ra0, _ := pp.ps.ComputePrimaryPRF(bx, 32)
+			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 32)
 			var r0, r1 ristretto.Scalar
 			r0.Derive(ra0)
 			r1.Derive(ra1)
@@ -139,8 +147,8 @@ func NewTree(pp *PubVerPar, es *EnumSet) *Tree {
 		binary.PutUvarint(bx, 0)
 		binary.PutUvarint(bl, 0)
 		bx = append(bx, bl...)
-		ra0, _ := pp.ps.ComputePrimaryPRF(bx, 64)
-		ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
+		ra0, _ := pp.ps.ComputePrimaryPRF(bx, 32)
+		ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 32)
 		var r0, r1 ristretto.Scalar
 		r0.Derive(ra0)
 		r1.Derive(ra1)
@@ -167,47 +175,93 @@ func MemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 		j := tree.levels - i
 		xi := x >> i
 		opens[j] = &Open{tree.tree[j][xi].r0, tree.tree[j][xi].r1}
-		if i >= 1 {
+		if j >= 1 {
 			xcoms[j] = &Com{tree.tree[j][xi].c0, tree.tree[j][xi].c1}
 			sibcoms[j] = &Com{tree.tree[j][xi^1].c0, tree.tree[j][xi^1].c1}
 		}
 	}
+
 	return &Answer{true, tree.levels, xcoms, sibcoms, opens, teases}
 }
 
 func NonMemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
-	// refine tree if necessary
+	// refine tree if necessary -- NEED TO FIX THIS!
 	for i := uint64(0); i <= tree.levels; i++ {
 		j := tree.levels - i
 		xi := x >> i
-		_, ok := tree.tree[j][xi]
-		if !ok {
-			if i == 0 {
+		_, okxi := tree.tree[j][xi]
+		_, okxip := tree.tree[j][xi^1]
+
+		/*
+			if !okxi {
+				if j > 0 {
+					bxip := make([]byte, 8)
+					bl := make([]byte, 8)
+					binary.PutUvarint(bxip, xi)
+					binary.PutUvarint(bl, j)
+					bxip = append(bxip, bl...)
+					ra0, _ := pp.ps.ComputePrimaryPRF(bxip, 32)
+					ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 32)
+					var r0, r1 ristretto.Scalar
+					r0.Derive(ra0)
+					r1.Derive(ra1)
+					c0, c1 := mc.SoftCommit(&r0, &r1)
+					tree.tree[j][xi^1] = NewNode(true, c0, c1, r0, r1)
+				}
+			}
+		*/
+
+		if !okxi {
+			if j == tree.levels {
 				bx := make([]byte, 8)
 				bl := make([]byte, 8)
 				binary.PutUvarint(bx, xi)
 				binary.PutUvarint(bl, j)
 				bx = append(bx, bl...)
-				ra0, _ := pp.ps.ComputePrimaryPRF(bx, 64)
-				ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
+				ra0, _ := pp.ps.ComputePrimaryPRF(bx, 32)
+				ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 32)
 				var r0, r1 ristretto.Scalar
 				r0.Derive(ra0)
 				r1.Derive(ra1)
 				c0, c1 := mc.HardCommit(&pp.h, []byte("bot"), &r0, &r1)
 				tree.tree[j][xi] = NewNode(false, c0, c1, r0, r1)
+			} else {
+				val0 := tree.tree[j+1][2*i]
+				val1 := tree.tree[j+1][(2*i)+1]
+				bsigma := val0.c0.Bytes()
+				bsigma = append(bsigma, val0.c1.Bytes()...)
+				bsigma = append(bsigma, val1.c0.Bytes()...)
+				bsigma = append(bsigma, val1.c1.Bytes()...)
+				bx := make([]byte, 8)
+				bl := make([]byte, 8)
+				binary.PutUvarint(bx, i)
+				binary.PutUvarint(bl, j)
+				bx = append(bx, bl...)
+				ra0, _ := pp.ps.ComputePrimaryPRF(bx, 32)
+				ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 32)
+				var r0, r1 ristretto.Scalar
+				r0.Derive(ra0)
+				r1.Derive(ra1)
+				c0, c1 := mc.HardCommit(&pp.h, bsigma, &r0, &r1)
+				tree.tree[j][xi] = NewNode(false, c0, c1, r0, r1)
 			}
-			bxip := make([]byte, 8)
-			bl := make([]byte, 8)
-			binary.PutUvarint(bxip, xi^1)
-			binary.PutUvarint(bl, j)
-			bxip = append(bxip, bl...)
-			ra0, _ := pp.ps.ComputePrimaryPRF(bxip, 64)
-			ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 64)
-			var r0, r1 ristretto.Scalar
-			r0.Derive(ra0)
-			r1.Derive(ra1)
-			c0, c1 := mc.SoftCommit(&r0, &r1)
-			tree.tree[j][xi] = NewNode(true, c0, c1, r0, r1)
+		}
+
+		if !okxip {
+			if j > 0 {
+				bxip := make([]byte, 8)
+				bl := make([]byte, 8)
+				binary.PutUvarint(bxip, xi^1)
+				binary.PutUvarint(bl, j)
+				bxip = append(bxip, bl...)
+				ra0, _ := pp.ps.ComputePrimaryPRF(bxip, 32)
+				ra1, _ := pp.ps.ComputePrimaryPRF(ra0, 32)
+				var r0, r1 ristretto.Scalar
+				r0.Derive(ra0)
+				r1.Derive(ra1)
+				c0, c1 := mc.SoftCommit(&r0, &r1)
+				tree.tree[j][xi^1] = NewNode(true, c0, c1, r0, r1)
+			}
 		}
 	}
 
@@ -222,21 +276,26 @@ func NonMemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 		val := tree.tree[j][xi]
 		var r ristretto.Scalar
 		if val.soft {
-			bxi := make([]byte, 8)
-			bl := make([]byte, 8)
-			binary.PutUvarint(bxi, xi)
-			binary.PutUvarint(bl, j)
-			bxi = append(bxi, bl...)
-			r = mc.SoftTease(bxi, &val.r0, &val.r1)
+			if j == tree.levels {
+				r = mc.SoftTease([]byte("bot"), &val.r0, &val.r1)
+			} else {
+				bxi := make([]byte, 8)
+				bl := make([]byte, 8)
+				binary.PutUvarint(bxi, xi)
+				binary.PutUvarint(bl, j)
+				bxi = append(bxi, bl...)
+				r = mc.SoftTease(bxi, &val.r0, &val.r1)
+			}
 		} else {
 			r = tree.tree[j][xi].r0
 		}
 		teases[j] = &r
-		if i >= 1 {
+		if j >= 1 {
 			xcoms[j] = &Com{tree.tree[j][xi].c0, tree.tree[j][xi].c1}
 			sibcoms[j] = &Com{tree.tree[j][xi^1].c0, tree.tree[j][xi^1].c1}
 		}
 	}
+
 	return &Answer{false, tree.levels, xcoms, sibcoms, opens, teases}
 }
 
@@ -250,7 +309,7 @@ func (tree *Tree) Path(pp *PubVerPar, x uint64, a bool) *Answer {
 
 func VerifyOpen(pp *PubVerPar, com Com, x uint64, answer *Answer) bool {
 	// verify all internal tree nodes
-	for i := uint64(1); i < answer.levels; i++ {
+	for i := uint64(1); i < answer.levels-1; i++ {
 		c := answer.xcoms[i]
 		pi := answer.opens[i]
 		vx := answer.xcoms[i+1]
@@ -298,11 +357,20 @@ func VerifyOpen(pp *PubVerPar, com Com, x uint64, answer *Answer) bool {
 		}
 	}
 
-	return true
+	// check x commit
+	bx := make([]byte, 8)
+	bl := make([]byte, 8)
+	binary.PutUvarint(bx, x)
+	binary.PutUvarint(bl, answer.levels)
+	bx = append(bx, bl...)
+	cx := answer.xcoms[answer.levels]
+	pix := answer.opens[answer.levels]
+	return mc.VerOpen(&pp.h, &cx.c0, &cx.c1, bx, &pix.r0, &pix.r1)
 }
 
 func VerifyTease(com Com, x uint64, answer *Answer) bool {
 	// verify all internal tree nodes
+
 	for i := uint64(1); i < answer.levels; i++ {
 		c := answer.xcoms[i]
 		tau := answer.teases[i]
@@ -329,7 +397,7 @@ func VerifyTease(com Com, x uint64, answer *Answer) bool {
 	}
 
 	// check root commit
-	tau := answer.teases[1]
+	tau := answer.teases[0]
 	vx := answer.xcoms[1]
 	vs := answer.sibcoms[1]
 	vxleft := ((x & (1 << ((answer.levels - 1) - 1))) >> ((answer.levels - 1) - 1))
