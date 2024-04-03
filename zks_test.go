@@ -2,8 +2,11 @@ package zks
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -39,7 +42,6 @@ func TestCorrectnessRand(t *testing.T) {
 	for i := uint64(0); i < max_value; i++ {
 		a := Qry(pp, repr, i)
 		v := Vfy(pp, com, i, a)
-		fmt.Println(i)
 		assert.True(t, v, "v should be true.")
 	}
 
@@ -75,7 +77,6 @@ func TestCorrectness(t *testing.T) {
 	for i := uint64(0); i < 16; i++ {
 		a := Qry(pp, repr, i)
 		v := Vfy(pp, com, i, a)
-		fmt.Println(i)
 		assert.True(t, v, "v should be true.")
 	}
 }
@@ -126,7 +127,6 @@ func TestCorrectness2(t *testing.T) {
 	for i := uint64(0); i < 32; i++ {
 		a := Qry(pp, repr, i)
 		v := Vfy(pp, com, i, a)
-		fmt.Println(i)
 		assert.True(t, v, "v should be true.")
 
 	}
@@ -402,7 +402,105 @@ func TestCorrectness3(t *testing.T) {
 	for i := uint64(0); i < 256; i++ {
 		a := Qry(pp, repr, i)
 		v := Vfy(pp, com, i, a)
-		fmt.Println(i)
 		assert.True(t, v, "v should be true.")
+	}
+}
+
+func TestPerformance(t *testing.T) {
+	summary_file, _ := os.Create("zks_summary.csv")
+
+	defer summary_file.Close()
+
+	summary_file.WriteString("|S| , |U|, Mean KG Time , Var KG Time , Mean Rep Time , Var Rep Time , Mean Qry Time , Var Qry Time , Mean Vfy Time , Var Vfy Time\n")
+
+	for c := 0; c <= 2; c++ {
+		for i := 8; i <= 18; i++ {
+
+			kt := 0
+			kts := 0
+			rt := 0
+			rts := 0
+			qt := 0
+			qts := 0
+			vt := 0
+			vts := 0
+
+			n := uint64(math.Pow(2, float64(i)))
+
+			var u uint64
+			if c == 0 {
+				u = uint64(math.Pow(2, float64(20)))
+			} else if c == 1 {
+				u = n * 16
+			} else {
+				u = n * 32
+			}
+
+			a := make([]uint64, u)
+			for i := range a {
+				a[i] = uint64(i)
+			}
+
+			rand.Shuffle(len(a), func(i, j int) { a[i], a[j] = a[j], a[i] })
+
+			var values = make(map[uint64]bool)
+
+			for j := uint64(n); j < n; j++ {
+				values[a[j]] = true
+			}
+
+			set := NewEnumSet(values, u)
+
+			for z := 0; z < 10; z++ {
+
+				startInit := time.Now()
+				pp := Gen()
+				elapsedInit := time.Since(startInit)
+
+				kt += int(elapsedInit)
+				kts += int(elapsedInit * elapsedInit)
+
+				startRep := time.Now()
+				repr, com := Rep(pp, set)
+				elapsedRep := time.Since(startRep)
+
+				rt += int(elapsedRep)
+				rts += int(elapsedRep * elapsedRep)
+
+				var s uint64
+
+				if z%2 == 0 {
+					s = a[n-10]
+				} else {
+					s = a[n+10]
+				}
+
+				startQry := time.Now()
+				a := Qry(pp, repr, s)
+				elapsedQry := time.Since(startQry)
+
+				qt += int(elapsedQry)
+				qts += int(elapsedQry * elapsedQry)
+
+				startVfy := time.Now()
+				Vfy(pp, com, s, a)
+				elapsedVfy := time.Since(startVfy)
+
+				vt += int(elapsedVfy)
+				vts += int(elapsedVfy * elapsedVfy)
+			}
+
+			KGmean := kt / 10
+			KGvar := int(math.Sqrt(float64((kts / 10) - (KGmean * KGmean))))
+			REPmean := rt / 10
+			REPvar := int(math.Sqrt(float64((rts / 10) - (REPmean * REPmean))))
+			QRYmean := qt / 10
+			QRYvar := int(math.Sqrt(float64((qts / 10) - (QRYmean * QRYmean))))
+			VFYmean := vt / 10
+			VFYvar := int(math.Sqrt(float64((vts / 10) - (VFYmean * VFYmean))))
+
+			fmt.Fprintln(summary_file, n, ",", u, ",", KGmean, ",", KGvar, ",", REPmean, ",", REPvar, ",", QRYmean, ",", QRYvar, ",", VFYmean, ",", VFYvar)
+
+		}
 	}
 }
