@@ -406,6 +406,38 @@ func TestCorrectness3(t *testing.T) {
 	}
 }
 
+type WAgg struct {
+	count int
+	mean  float64
+	m2    float64
+}
+
+func NewWAgg() *WAgg {
+	aggregate := WAgg{
+		count: 0,
+		mean:  0.0,
+		m2:    0.0,
+	}
+
+	return &aggregate
+}
+
+func (wa *WAgg) Update(v int) {
+	wa.count += 1
+	delta := float64(v) - wa.mean
+	wa.mean += delta / float64(wa.count)
+	delta2 := float64(v) - wa.mean
+	wa.m2 += delta * delta2
+}
+
+func (wa *WAgg) Finalize() (float64, float64) {
+	if wa.count < 2 {
+		return wa.mean, 0
+	} else {
+		return wa.mean, float64(math.Sqrt(wa.m2 / float64(wa.count)))
+	}
+}
+
 func TestPerformance(t *testing.T) {
 	summary_file, _ := os.Create("zks_summary.csv")
 
@@ -416,14 +448,10 @@ func TestPerformance(t *testing.T) {
 	for c := 0; c <= 2; c++ {
 		for i := 8; i <= 18; i++ {
 
-			kt := 0
-			kts := 0
-			rt := 0
-			rts := 0
-			qt := 0
-			qts := 0
-			vt := 0
-			vts := 0
+			KGagg := NewWAgg()
+			REPagg := NewWAgg()
+			QRYagg := NewWAgg()
+			VFYagg := NewWAgg()
 
 			n := uint64(math.Pow(2, float64(i)))
 
@@ -457,16 +485,13 @@ func TestPerformance(t *testing.T) {
 				pp := Gen()
 				elapsedInit := time.Since(startInit)
 
-				kt += int(elapsedInit)
-				kts += int(elapsedInit * elapsedInit)
+				KGagg.Update(int(elapsedInit))
 
 				startRep := time.Now()
 				repr, com := Rep(pp, set)
 				elapsedRep := time.Since(startRep)
 
-				rt += int(elapsedRep)
-				rts += int(elapsedRep * elapsedRep)
-
+				REPagg.Update(int(elapsedRep))
 				var s uint64
 
 				if z%2 == 0 {
@@ -479,25 +504,19 @@ func TestPerformance(t *testing.T) {
 				a := Qry(pp, repr, s)
 				elapsedQry := time.Since(startQry)
 
-				qt += int(elapsedQry)
-				qts += int(elapsedQry * elapsedQry)
+				QRYagg.Update(int(elapsedQry))
 
 				startVfy := time.Now()
 				Vfy(pp, com, s, a)
 				elapsedVfy := time.Since(startVfy)
 
-				vt += int(elapsedVfy)
-				vts += int(elapsedVfy * elapsedVfy)
+				VFYagg.Update(int(elapsedVfy))
 			}
 
-			KGmean := kt / 10
-			KGvar := int(math.Sqrt(float64((kts / 10) - (KGmean * KGmean))))
-			REPmean := rt / 10
-			REPvar := int(math.Sqrt(float64((rts / 10) - (REPmean * REPmean))))
-			QRYmean := qt / 10
-			QRYvar := int(math.Sqrt(float64((qts / 10) - (QRYmean * QRYmean))))
-			VFYmean := vt / 10
-			VFYvar := int(math.Sqrt(float64((vts / 10) - (VFYmean * VFYmean))))
+			KGmean, KGvar := KGagg.Finalize()
+			REPmean, REPvar := REPagg.Finalize()
+			QRYmean, QRYvar := QRYagg.Finalize()
+			VFYmean, VFYvar := VFYagg.Finalize()
 
 			fmt.Fprintln(summary_file, n, ",", u, ",", KGmean, ",", KGvar, ",", REPmean, ",", REPvar, ",", QRYmean, ",", QRYvar, ",", VFYmean, ",", VFYvar)
 
