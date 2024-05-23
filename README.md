@@ -1,6 +1,6 @@
 # ZKS
 
-We provide an implementation of Zero-Knowledge Sets (ZKS) first introduced by Micali, Rabin, and Kilian [MRK03](https://people.csail.mit.edu/silvio/Selected%20Scientific%20Papers/Zero%20Knowledge/Zero-Knowledge_Sets.pdf). We base our construction off the one described in *Mercurial Commitments with Applications to Zero-Knowledge Sets* by Chase et al. [CHLMR05](https://cs.brown.edu/~mchase/papers/merc.pdf).
+We provide an implementation of Zero-Knowledge Sets (ZKS) first introduced by Micali, Rabin, and Kilian [[MRK03](https://people.csail.mit.edu/silvio/Selected%20Scientific%20Papers/Zero%20Knowledge/Zero-Knowledge_Sets.pdf)]. We base our construction off the one described in *Mercurial Commitments with Applications to Zero-Knowledge Sets* by Chase et al. [[CHLMR05](https://cs.brown.edu/~mchase/papers/merc.pdf)].
 
 ## API
 
