@@ -15,7 +15,13 @@ For instance one can create a set with maximally 10 values as such:
 		0:  true,
 		1:  false,
 		2:  false,
-		3:  true,
+		3:  true,install the ZKS package"
+
+```shell
+go get -u github.com/smarky7CD/ZKS
+```
+
+The package can be imported and used as such:
 		4:  true,
 		5:  true,
 		6:  false,
@@ -40,7 +46,7 @@ One can also create this set dynamically by creating an empty EnumSet and using 
 
 ## Installing and Using
 
-To install the ZKS package"
+To install the ZKS package:
 
 ```shell
 go get -u github.com/smarky7CD/ZKS
