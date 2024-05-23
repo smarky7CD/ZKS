@@ -8,6 +8,9 @@ import (
 	mc "github.com/smarky7CD/go-dl-mercurial-commitments"
 )
 
+// soft indicates whether the nodes is a hard or soft commitment.
+// c0,c1 is the commitment to the node.
+// r0,r1 random scalars used to (could instead be computed on the fly).
 type TreeNode struct {
 	soft bool
 	c0   ristretto.Point
@@ -16,20 +19,27 @@ type TreeNode struct {
 	r1   ristretto.Scalar
 }
 
+// Generate a new tree node
 func NewNode(soft bool, c0 ristretto.Point, c1 ristretto.Point, r0 ristretto.Scalar, r1 ristretto.Scalar) *TreeNode {
 	return &TreeNode{soft, c0, c1, r0, r1}
 }
 
+// Tree is the internal ZKS representation.
+// root is the commitment to the ZKS.
+// tree is a nested map of nodes -- one map per level.
+// levels is the depth of the tree.
 type Tree struct {
 	root   TreeNode
 	tree   map[uint64]map[uint64]*TreeNode
 	levels uint64
 }
 
+// Computes the next highest power of 2 on input n.
 func ComputeNearestPowerof2(n uint64) uint64 {
 	return uint64(math.Ceil(math.Log2(float64(n))))
 }
 
+// Computes the leaves of the tree.
 func ComputeLeaves(pp *PubVerPar, es *EnumSet, level uint64) map[uint64]*TreeNode {
 	var leaves = make(map[uint64]*TreeNode)
 
@@ -68,6 +78,7 @@ func ComputeLeaves(pp *PubVerPar, es *EnumSet, level uint64) map[uint64]*TreeNod
 	return leaves
 }
 
+// Computes the non-leaf layers of the tree representation.
 func ComputeLayer(pp *PubVerPar, level uint64, prev_layer_nodes map[uint64]*TreeNode) map[uint64]*TreeNode {
 	var layer_nodes = make(map[uint64]*TreeNode)
 
@@ -123,6 +134,8 @@ func ComputeLayer(pp *PubVerPar, level uint64, prev_layer_nodes map[uint64]*Tree
 
 }
 
+// Creates a new tree given an EnumSet.
+// Calls ComputeLeaves and ComputeLayers.
 func NewTree(pp *PubVerPar, es *EnumSet) *Tree {
 	levels := ComputeNearestPowerof2(es.max)
 	var tree = make(map[uint64]map[uint64]*TreeNode)
@@ -158,13 +171,16 @@ func NewTree(pp *PubVerPar, es *EnumSet) *Tree {
 	return &Tree{*tree[0][0], tree, levels}
 }
 
+// Information to open a commitment.
 type Open struct {
 	r0 ristretto.Scalar
 	r1 ristretto.Scalar
 }
 
+// Information to tease a commitment.
 type Tease = ristretto.Scalar
 
+// Computes an authentication path in the tree for an element in the set.
 func MemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 	var opens = make(map[uint64]*Open)
 	var xcoms = make(map[uint64]*Com)
@@ -183,6 +199,7 @@ func MemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 	return &Answer{true, tree.levels, xcoms, sibcoms, opens, teases}
 }
 
+// Computes an authentication path in the tree for an element not in the set.
 func NonMemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 	for i := uint64(0); i <= tree.levels-1; i++ {
 		j := tree.levels - i
@@ -278,6 +295,8 @@ func NonMemberPath(tree *Tree, pp *PubVerPar, x uint64) *Answer {
 	return &Answer{false, tree.levels, xcoms, sibcoms, opens, teases}
 }
 
+// Computes an authentication path for element x.
+// Calls either MemberPath or NonMemberPath.
 func (tree *Tree) Path(pp *PubVerPar, x uint64, a bool) *Answer {
 	if a {
 		return MemberPath(tree, pp, x)
@@ -286,6 +305,7 @@ func (tree *Tree) Path(pp *PubVerPar, x uint64, a bool) *Answer {
 	}
 }
 
+// Verifies a hard commitment path.
 func VerifyOpen(pp *PubVerPar, com Com, x uint64, answer *Answer) bool {
 	// verify all internal tree nodes
 	for i := uint64(1); i <= answer.levels-1; i++ {
@@ -348,6 +368,7 @@ func VerifyOpen(pp *PubVerPar, com Com, x uint64, answer *Answer) bool {
 	return mc.VerOpen(&pp.h, &cx.c0, &cx.c1, bx, &pix.r0, &pix.r1)
 }
 
+// Verifies a soft commitment path.
 func VerifyTease(com Com, x uint64, answer *Answer) bool {
 	// verify all internal tree nodes
 
@@ -405,6 +426,8 @@ func VerifyTease(com Com, x uint64, answer *Answer) bool {
 	return mc.VerTease(&cx.c0, &cx.c1, []byte("bot"), taux)
 }
 
+// Verifies an authentication path for element x.
+// Calls either VerifyOpen or VerifyTease.
 func VerifyPath(pp *PubVerPar, com Com, x uint64, answer *Answer) bool {
 	if answer.answer {
 		return VerifyOpen(pp, com, x, answer)

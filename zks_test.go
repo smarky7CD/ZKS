@@ -443,7 +443,7 @@ func TestPerformance(t *testing.T) {
 
 	defer summary_file.Close()
 
-	summary_file.WriteString("|S| , |U|, Mean KG Time , Var KG Time , Mean Rep Time , Var Rep Time , Mean Qry Time , Var Qry Time , Mean Vfy Time , Var Vfy Time\n")
+	summary_file.WriteString("|S| , |U|, Mean PP Gen Time , Var PP Time , Mean Rep Time , Var Rep Time , Mean Qry Time , Var Qry Time , Mean Vfy Time , Var Vfy Time\n")
 
 	for c := 0; c <= 2; c++ {
 		for i := 8; i <= 18; i++ {
