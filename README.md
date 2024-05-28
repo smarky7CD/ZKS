@@ -6,7 +6,7 @@ We provide an implementation of Zero-Knowledge Sets (ZKS) first introduced by Mi
 
 ### Enum Sets
 
-The data stored in a ZKS must be stored as an enumerated set. That is, items need to be stored in a map that maps integers (up to some max value) to a boolean value indicating set-membership .
+The data stored in a ZKS must be stored as an enumerated set. That is, items need to be stored in a map that maps integers (up to some max value) to a boolean value indicating set-membership.
 
 For instance one can create a set with maximally 10 values as such:
 
@@ -15,13 +15,7 @@ For instance one can create a set with maximally 10 values as such:
 		0:  true,
 		1:  false,
 		2:  false,
-		3:  true,install the ZKS package"
-
-```shell
-go get -u github.com/smarky7CD/ZKS
-```
-
-The package can be imported and used as such:
+		3:  true,
 		4:  true,
 		5:  true,
 		6:  false,
@@ -95,7 +89,6 @@ func ZKSexample() {
 	}
 
 }
-
 
 ```
 
