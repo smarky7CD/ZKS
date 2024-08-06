@@ -22,7 +22,6 @@ For instance one can create a set with maximally 10 values as such:
 		7:  false,
 		8:  false,
 		9:  false,
-		10: true,
     }
 
     set := NewEnumSet(values, 10)
